@@ -1,6 +1,9 @@
 -- Use this script to measure how long it takes to do a forward/backward pass through the standard deepspeech model.
 require 'UtilsMultiGPU'
 
+require 'cudnn'
+cudnn.benchmark = true
+
 -- Options can be overrided on command line run.
 local cmd = torch.CmdLine()
 cmd:option('-modelName', 'DeepSpeechModel', 'Name of class containing architecture')
@@ -23,17 +26,30 @@ local model = require(opt.modelName)
 model = model[1](opt)
 model = makeDataParallel(model, opt.nGPU)
 
-local timer = torch.Timer()
+local time_fwd = 0
+local time_bwd = 0
+local loops = 100
+local loops_burnin = 50
 
-timer:reset()
+for i = 1, loops do
 
-local output = model:forward(input)
-local fwdTime = timer:time().real
+  local timer = torch.Timer()
 
-timer:reset()
+  timer:reset()
 
-model:backward(input, output)
+  local output = model:forward(input)
+  local time_fwd_i = timer:time().real
 
-local bwdTime = timer:time().real
+  timer:reset()
 
-print(("Forward Time: %.3fs Backward Time: %.3fs Full Time: %.3fs"):format(fwdTime, bwdTime, fwdTime + bwdTime))
+  model:backward(input, output)
+
+  local time_bwd_i = timer:time().real
+
+  if i >= loops_burnin then
+    time_fwd = time_fwd + time_fwd_i / (loops - loops_burnin)
+    time_bwd = time_bwd + time_bwd_i / (loops - loops_burnin)
+  end
+end
+
+print(("Forward Time: %.3fs Backward Time: %.3fs Full Time: %.3fs"):format(time_fwd, time_bwd, time_fwd + time_bwd))
